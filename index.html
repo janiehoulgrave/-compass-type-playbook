@@ -628,6 +628,7 @@ footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--rule);font-si
 </div>
 <div id="pdfRoot" class="pdf" aria-hidden="true"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
@@ -1609,18 +1610,40 @@ footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--rule);font-si
       '<h4>Rules for every style</h4><ul class="pdf-list"><li>Never mix Compass Display and Compass Serif. Pair either one with Compass Sans.</li><li>Never bold Compass Display. Make it bigger instead.</li><li>ALL CAPS always get tracking (10 or 20, per your style). Sentence case always stays at 0.</li><li>One kind of emphasis at a time: bold, italic or caps.</li><li>Two font treatments per style: one for headlines, one for everything else. Never add a third.</li></ul>'+foot(2)+'</div>';
     return [p1,p2];
   }
+  function loadAllFonts(){
+    if(!document.fonts||!document.fonts.load) return Promise.resolve();
+    var faces=['400 20px "Compass Display"','italic 400 20px "Compass Display"','400 20px "Compass Serif"','italic 400 20px "Compass Serif"','600 20px "Compass Serif"','italic 600 20px "Compass Serif"','400 20px "Compass Serif Text"','italic 400 20px "Compass Serif Text"','300 20px "Compass Sans"','400 20px "Compass Sans"','italic 400 20px "Compass Sans"','500 20px "Compass Sans"','700 20px "Compass Sans"'];
+    return Promise.all(faces.map(function(f){return document.fonts.load(f,'Aa$0').catch(function(){});})).then(function(){return document.fonts.ready;});
+  }
+  function nextFrame(){return new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});}
+  function renderPage(pg,fontCss){
+    var bg='#F5F4F1';
+    if(window.htmlToImage&&window.htmlToImage.toCanvas){
+      var o={pixelRatio:2,backgroundColor:bg,cacheBust:false,width:816,height:1056};
+      if(fontCss) o.fontEmbedCSS=fontCss;
+      // first pass warms images and fonts (needed by Safari), second pass is the keeper
+      return window.htmlToImage.toCanvas(pg,o).then(function(){return window.htmlToImage.toCanvas(pg,o);})
+        .catch(function(){return window.html2canvas(pg,{scale:2,backgroundColor:bg,logging:false});});
+    }
+    return window.html2canvas(pg,{scale:2,backgroundColor:bg,logging:false});
+  }
   function buildPdf(){
     var root=$('pdfRoot'); root.innerHTML=pdfPages().join('');
     var pages=root.querySelectorAll('.pdf-page');
     var doc=new window.jspdf.jsPDF({unit:'pt',format:'letter',orientation:'portrait'});
-    var chain=(document.fonts&&document.fonts.ready)?document.fonts.ready:Promise.resolve();
+    var fontCss=null;
+    var chain=loadAllFonts().then(nextFrame).then(function(){
+      if(window.htmlToImage&&window.htmlToImage.getFontEmbedCSS){
+        return window.htmlToImage.getFontEmbedCSS(pages[0]).then(function(c){fontCss=c;}).catch(function(){});
+      }
+    });
     Array.prototype.forEach.call(pages,function(pg,i){
-      chain=chain.then(function(){return window.html2canvas(pg,{scale:2,backgroundColor:'#F5F4F1',logging:false});}).then(function(cv){
+      chain=chain.then(function(){return renderPage(pg,fontCss);}).then(function(cv){
         if(i>0) doc.addPage('letter','portrait');
         doc.addImage(cv.toDataURL('image/jpeg',0.92),'JPEG',0,0,612,792);
       });
     });
-    return chain.then(function(){root.innerHTML='';return doc.output('blob');});
+    return chain.then(function(){root.innerHTML='';return doc.output('blob');},function(e){root.innerHTML='';throw e;});
   }
   window.ctpBuildPdf=buildPdf;
   var pdfBtn=$('pdfBtn'), pdfMsg=$('pdfMsg');
